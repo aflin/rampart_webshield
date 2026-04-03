@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Multi-Font Stress Test</title>
+    <style>
+        /* Font 1: Inter Regular (Latin, Greek, Cyrillic) */
+        @font-face {
+            font-family: 'Inter';
+            font-weight: 400;
+            font-style: normal;
+            src: url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfMZg.ttf) format('truetype');
+        }
+        /* Font 2: Inter Bold */
+        @font-face {
+            font-family: 'Inter';
+            font-weight: 700;
+            font-style: normal;
+            src: url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuFuYMZg.ttf) format('truetype');
+        }
+        /* Font 3: Inter Italic */
+        @font-face {
+            font-family: 'Inter';
+            font-weight: 400;
+            font-style: italic;
+            src: url(https://fonts.gstatic.com/s/inter/v20/UcCM3FwrK3iLTcvneQg7Ca725JhhKnNqk4j1ebLhAm8SrXTc2dthjQ.ttf) format('truetype');
+        }
+        /* Font 4: Noto Sans Arabic */
+        @font-face {
+            font-family: 'NotoArabic';
+            font-weight: 400;
+            src: url(https://fonts.gstatic.com/s/notosansarabic/v33/nwpxtLGrOAZMl5nJ_wfgRg3DrWFZWsnVBJ_sS6tlqHHFlhQ5l3sQWIHPqzCfyGyvuw.ttf) format('truetype');
+        }
+        /* Font 5: Noto Sans Arabic Bold */
+        @font-face {
+            font-family: 'NotoArabic';
+            font-weight: 700;
+            src: url(https://fonts.gstatic.com/s/notosansarabic/v33/nwpxtLGrOAZMl5nJ_wfgRg3DrWFZWsnVBJ_sS6tlqHHFlhQ5l3sQWIHPqzCfL2uvuw.ttf) format('truetype');
+        }
+        /* Font 6: Noto Sans (broad Latin/Greek/Cyrillic - overlaps with Inter) */
+        @font-face {
+            font-family: 'NotoSans';
+            src: url(https://fonts.gstatic.com/s/notosans/v42/o-0mIpQlx3QUlC5A4PNB6Ryti20_6n1iPHjcz6L1SoM-jCpoiyD9A99d.ttf) format('truetype');
+        }
+        body {
+            margin: 40px;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            font-family: 'Inter', sans-serif;
+        }
+        .card {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #161616;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+        }
+        h1 { color: #00cc88; }
+        h2 { color: #00cc88; margin-bottom: 10px; }
+        .label { color: #666; font-size: 0.85em; margin-bottom: 4px; }
+        p { line-height: 1.7; margin-bottom: 8px; }
+        .bold { font-weight: 700; }
+        .italic { font-style: italic; }
+        .arabic { font-family: 'NotoArabic', sans-serif; }
+        .arabic-bold { font-family: 'NotoArabic', sans-serif; font-weight: 700; }
+        .noto { font-family: 'NotoSans', sans-serif; }
+    </style>
+</head>
+<body>
+    <h1>Multi-Font Stress Test</h1>
+    <p>Six font files, three families, bold/italic variants, LTR and RTL, overlapping codepoint sets.</p>
+
+    <!-- Test 1: Inter Regular -->
+    <div class="card">
+        <div class="label">Font 1: Inter Regular</div>
+        <h2>The Quick Brown Fox</h2>
+        <p>The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.</p>
+        <p>ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789</p>
+    </div>
+
+    <!-- Test 2: Inter Bold -->
+    <div class="card">
+        <div class="label">Font 2: Inter Bold</div>
+        <p class="bold">This text should be bold. The quick brown fox jumps over the lazy dog in bold weight.</p>
+        <p class="bold">ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789</p>
+    </div>
+
+    <!-- Test 3: Inter Italic -->
+    <div class="card">
+        <div class="label">Font 3: Inter Italic</div>
+        <p class="italic">This text should be italic. The quick brown fox jumps over the lazy dog in italic style.</p>
+        <p class="italic">ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789</p>
+    </div>
+
+    <!-- Test 4: Noto Sans Arabic Regular -->
+    <div class="card" dir="rtl" lang="fa">
+        <div class="label" dir="ltr">Font 4: Noto Sans Arabic Regular</div>
+        <div data-no-scramble="true" style="font-family:sans-serif;color:#666;font-size:1.4em;margin-bottom:4px;">فارسی عادی</div>
+        <h2 class="arabic">فارسی عادی</h2>
+        <div data-no-scramble="true" style="font-family:sans-serif;color:#666;font-size:1.4em;margin-bottom:4px;">این یک آزمایش متن فارسی با فونت نوتو سنس عربی است. این متن باید به درستی از راست به چپ نمایش داده شود.</div>
+        <p class="arabic">این یک آزمایش متن فارسی با فونت نوتو سنس عربی است. این متن باید به درستی از راست به چپ نمایش داده شود.</p>
+        <div data-no-scramble="true" style="font-family:sans-serif;color:#666;font-size:1.4em;margin-bottom:4px;">الف ب پ ت ث ج چ ح خ د ذ ر ز ژ س ش ص ض ط ظ ع غ ف ق ک گ ل م ن و ه ی</div>
+        <p class="arabic">الف ب پ ت ث ج چ ح خ د ذ ر ز ژ س ش ص ض ط ظ ع غ ف ق ک گ ل م ن و ه ی</p>
+    </div>
+
+    <!-- Test 5: Noto Sans Arabic Bold -->
+    <div class="card" dir="rtl" lang="fa">
+        <div class="label" dir="ltr">Font 5: Noto Sans Arabic Bold</div>
+        <div data-no-scramble="true" style="font-family:sans-serif;color:#666;font-size:1.4em;margin-bottom:4px;">این متن باید با فونت عربی ضخیم نمایش داده شود. حروف ضخیم‌تر از حالت عادی هستند.</div>
+        <p class="arabic-bold">این متن باید با فونت عربی ضخیم نمایش داده شود. حروف ضخیم‌تر از حالت عادی هستند.</p>
+    </div>
+
+    <!-- Test 6: Noto Sans (overlaps with Inter for Latin) -->
+    <div class="card">
+        <div class="label">Font 6: Noto Sans (overlaps with Inter)</div>
+        <p class="noto">This text uses Noto Sans, which covers the same Latin characters as Inter. Both fonts should render correctly with the shared mapping.</p>
+        <p class="noto">ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789</p>
+        <div data-no-scramble="true" style="font-family:sans-serif;color:#666;font-size:1.2em;margin-bottom:4px;">Greek: ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ αβγδεζηθικλμνξοπρστυφχψω</div>
+        <p class="noto">Greek: ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ αβγδεζηθικλμνξοπρστυφχψω</p>
+    </div>
+
+    <!-- Test 7: Mixed inline content -->
+    <div class="card">
+        <div class="label">Mixed: Inter + Noto Arabic inline</div>
+        <p>English regular, <span class="bold">English bold</span>, <span class="italic">English italic</span>,
+           and Farsi: <span class="arabic" dir="rtl" lang="fa">کتاب</span> (book),
+           <span class="arabic-bold" dir="rtl" lang="fa">سلام</span> (hello).</p>
+        <p>Noto Sans overlap: <span class="noto">same characters, different font file</span>.</p>
+    </div>
+</body>
+</html>

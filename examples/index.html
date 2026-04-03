@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>rampart-webshield</title>
+    <style>
+        @font-face {
+            font-family: 'ShieldFont';
+            src: url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfMZg.ttf) format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'ShieldFont', sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 60px 20px;
+        }
+        .container { max-width: 780px; width: 100%; }
+        h1 { font-size: 2.4em; color: #00cc88; margin-bottom: 8px; letter-spacing: -0.5px; }
+        .subtitle { color: #888; font-size: 1.1em; margin-bottom: 40px; }
+        .card {
+            background: #161616; border: 1px solid #2a2a2a;
+            border-radius: 10px; padding: 28px; margin-bottom: 24px;
+        }
+        .card h2 { color: #00cc88; font-size: 1.3em; margin-bottom: 12px; }
+        .card p, .card li { line-height: 1.7; color: #bbb; }
+        .card ul { margin: 10px 0 10px 24px; }
+        .card li { margin-bottom: 4px; }
+        .highlight {
+            background: #1a2e24; border: 1px solid #00cc88;
+            border-radius: 8px; padding: 20px; margin-top: 16px;
+            font-size: 0.95em; color: #99ddbb; line-height: 1.6;
+        }
+        [data-no-scramble],
+        [data-no-scramble] code,
+        [data-no-scramble] pre {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+        code, pre {
+            font-family: 'ShieldFont', sans-serif;
+        }
+        pre {
+            background: #111; border: 1px solid #333; border-radius: 6px;
+            padding: 16px; margin: 12px 0; overflow-x: auto;
+            font-size: 0.9em; line-height: 1.5; color: #cde;
+        }
+        p code {
+            background: #1a1a1a; padding: 2px 6px; border-radius: 3px;
+            color: #8cf; font-size: 0.85em;
+        }
+        .footer {
+            margin-top: 40px; text-align: center;
+            color: #555; font-size: 0.85em;
+        }
+        .footer a { color: #00cc88; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>rampart-webshield</h1>
+        <div class="subtitle">Font-based text obfuscation for web pages</div>
+
+        <div class="card">
+            <h2>What is this?</h2>
+            <p>This page demonstrates font-based anti-scraping protection.
+               The text you are reading looks normal in your browser,
+               but the page source contains scrambled Unicode characters.
+               Bots and scrapers that read the raw HTML will only see
+               meaningless character sequences.</p>
+            <div class="highlight">
+                Try it: right-click this page and select "View Page Source"
+                to see the obfuscated HTML. Then try to copy and paste
+                the text above. It will be garbled.
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Module API</h2>
+            <p>The <code>rampart-webshield</code> module exports a
+               <code>fontshuffle</code> function that takes an HTML page,
+               finds its font files, scrambles them, and rewrites the text.
+               It can also scramble images using tile shuffling.</p>
+            <div data-no-scramble="true">
+<pre><code>var ws = require("rampart-webshield");
+
+// Simple mode (1-to-1 substitution):
+var result = ws.fontshuffle("page.html", 42);
+
+// Multi mode (many-to-1, defeats frequency analysis):
+var result = ws.fontshuffle("page.html", 42, {mode: "multi"});
+
+// Reuse saved mappings (skip font generation):
+var result = ws.fontshuffle("page.html", 42, {mappings: saved});
+
+// Enable image scrambling (requires rampart-gm):
+var result = ws.fontshuffle("page.html", 42, {
+    mode: "multi",
+    images: true               // or {tileSize: 16} for custom
+});
+
+// Enable guard (CDP trap + delayed font loading):
+var result = ws.fontshuffle("page.html", 42, {
+    mode: "multi",
+    guard: true            // or {delay: 300} for custom
+});
+
+// Result:
+//   result.text     - obfuscated HTML string
+//   result.fonts    - [{name: "font.ws.ttf", data: Buffer}, ...]
+//   result.images   - [{name: "img.ws.jpg", data: Buffer}, ...]
+//   result.mappings - mapping data (save as JSON to reuse)
+
+// Scramble a single image directly:
+var img = ws.scrambleImage("photo.jpg", 42, {tileSize: 32});
+// img.image  = Buffer (scrambled image)
+// img.width  = original width
+// img.height = original height</code></pre>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Parameters</h2>
+            <ul>
+                <li><code>html</code> - HTML text as a string, or a filename to read</li>
+                <li><code>seed</code> - A positive number used to seed the PRNG</li>
+                <li><code>options.mode</code> - "simple" (default) or "multi"</li>
+                <li><code>options.mappings</code> - Previously saved mapping data to reuse</li>
+                <li><code>options.images</code> - Enable image scrambling. Set to <code>true</code> for default 32px tiles, or <code>{tileSize: N}</code> for custom. All <code>&lt;img&gt;</code> tags are tile-shuffled and a client-side canvas script is injected to unscramble them. Requires <code>rampart-gm</code> module and the GraphicsMagick libraries (<code>apt install libgraphicsmagick-q16-3</code>).</li>
+                <li><code>options.guard</code> - Enable CDP trap + delayed font loading. Set to <code>true</code> for default 500ms delay, or <code>{delay: N}</code> for custom. Automation frameworks like Puppeteer, Playwright, and Selenium are blocked from loading the font.</li>
+            </ul>
+            <p>Font files are discovered automatically from
+               <code>@font-face</code> declarations in inline styles
+               and linked stylesheets. Both local files and remote URLs
+               (fetched via rampart-curl) are supported.</p>
+        </div>
+
+        <div class="card">
+            <h2>No-scramble zones</h2>
+            <p>Add <code>data-no-scramble</code> to any element to
+               prevent its content from being scrambled. Use this for
+               code blocks or other content that needs to be
+               copy-pasteable. Pair it with a system font so the
+               unscrambled text renders correctly.</p>
+            <div data-no-scramble="true">
+<pre><code>&lt;div data-no-scramble="true"&gt;
+    &lt;pre&gt;&lt;code&gt;This text will not be scrambled.&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;</code></pre>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>CLI Usage</h2>
+            <p>The <code>webshield.js</code> script provides a command-line
+               interface. It reads an HTML file, obfuscates it, and writes
+               the output files to a directory.</p>
+            <div data-no-scramble="true">
+<pre><code># Multi mode (default, defeats frequency analysis):
+rampart webshield.js page.html 42 output/
+
+# Simple mode (1-to-1 substitution):
+rampart webshield.js page.html 42 output/ --simple
+
+# Reuse existing font + mappings:
+rampart webshield.js page.html 42 output/ --reuse
+
+# Enable image scrambling (requires rampart-gm):
+rampart webshield.js page.html 42 output/ --images
+
+# Custom tile size (default 32px):
+rampart webshield.js page.html 42 output/ --images --tile-size 16
+
+# Enable CDP guard (blocks Puppeteer/Playwright/Selenium):
+rampart webshield.js page.html 42 output/ --guard
+
+# Guard with custom delay (default 500ms):
+rampart webshield.js page.html 42 output/ --guard --guard-delay 300
+
+# Output:
+#   output/page.html          - obfuscated HTML
+#   output/fontname.ws.ttf    - scrambled font
+#   output/imgname.ws.jpg     - scrambled images (with --images)
+#   &lt;source_dir&gt;/fontname-mappings.ws.json  - saved mappings</code></pre>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Using with rampart-server</h2>
+            <p>To obfuscate pages dynamically on each request, load the
+               module in a rampart-server app. Generate the font and mappings
+               once at startup, then use the saved mappings to encode each
+               page on the fly. In multi mode, every response uses different
+               codepoints for the same text.</p>
+            <div data-no-scramble="true">
+<pre><code>var server = require("rampart-server");
+var ws     = require("rampart-webshield");
+
+// Generate font, images + mappings once at startup
+var init = ws.fontshuffle("template.html", 98765, {
+    mode: "multi",
+    images: true             // requires rampart-gm
+});
+
+// Write font and scrambled images to the web root
+for (var i = 0; i &lt; init.fonts.length; i++)
+    rampart.utils.fprintf("html/" + init.fonts[i].name, '%s', init.fonts[i].data);
+for (var i = 0; i &lt; init.images.length; i++)
+    rampart.utils.fprintf("html/" + init.images[i].name, '%s', init.images[i].data);
+
+// Save mappings for reuse
+var savedMappings = init.mappings;
+
+server.start({
+    bind: ["0.0.0.0:8080"],
+    map: {
+        "/": function(req) {
+            // On each request, encode with saved mappings
+            // (no font/image regeneration, just text remapping)
+            var result = ws.fontshuffle(
+                "template.html", 0,
+                {mappings: savedMappings}
+            );
+            return {html: result.text};
+        }
+    }
+});</code></pre>
+            </div>
+            <p>Since multi mode uses Math.random() for alias selection,
+               each response is different even with the same mappings.
+               Scrapers cannot correlate repeated requests to crack the
+               substitution.</p>
+        </div>
+
+        <div class="card">
+            <h2>Image scrambling</h2>
+            <p>Images can also be scrambled using tile shuffling. The image
+               below has been tile-shuffled — right-click and save it to see
+               the scrambled version. The browser unscrambles it on the fly
+               using a small canvas script.</p>
+            <div style="text-align:center;margin-top:16px;">
+                <img src="puppy.jpg" alt="Demo image" style="max-width:500px;border-radius:8px;">
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Simple vs Multi mode</h2>
+            <p>In simple mode, each character maps to exactly one scrambled
+               codepoint. This is fast and works well when a new seed is
+               generated per request. In multi mode, each character maps
+               to many codepoints, all pointing to the same glyph. The
+               encoder randomly picks from these aliases, so identical
+               words look different in the source each time. This defeats
+               frequency analysis on static pages.</p>
+        </div>
+
+        <div class="card">
+            <h2>Multiple fonts</h2>
+            <p>Pages can use multiple font families, including bold and
+               italic variants, and mix LTR and RTL scripts. Each font
+               is scrambled independently but they share a consistent
+               mapping so the same encoded text works across all fonts
+               on the page.</p>
+            <p>See the <a href="multifont-test.html">multi-font test page</a>
+               for a live example with six font files (Inter Regular,
+               Bold, and Italic; Noto Sans Arabic Regular and Bold;
+               Noto Sans) covering English, Farsi, and Greek.</p>
+        </div>
+
+        <div class="card">
+            <h2>What Puppeteer sees</h2>
+            <p>When the guard option is enabled, a CDP (Chrome DevTools
+               Protocol) trap detects automation frameworks like Puppeteer,
+               Playwright, and Selenium. The scrambled font is never loaded,
+               so both the page source and the rendered output are unreadable.
+               Below is an actual screenshot taken by Puppeteer with the
+               Stealth plugin enabled:</p>
+            <div data-no-scramble="true" style="max-height:400px;overflow-y:auto;border:1px solid #333;border-radius:8px;margin-top:12px;">
+                <a href="screenshot-headless-stealth.png">
+                    <img src="screenshot-headless-stealth.png"
+                         alt="Screenshot of garbled page as seen by Puppeteer"
+                         style="width:100%;display:block;">
+                </a>
+            </div>
+            <p style="color:#888;font-size:0.9em;margin-top:8px;">
+               This screenshot was captured using Puppeteer with
+               puppeteer-extra-plugin-stealth, the best available
+               evasion toolkit. The CDP trap detected the automation
+               and blocked the font from loading.</p>
+        </div>
+
+        <div class="card">
+            <h2>Email and phone protection</h2>
+            <p>When the guard is enabled, <code>mailto:</code> and
+               <code>tel:</code> links are obfuscated in the HTML source.
+               The links work normally for human visitors — clicking them
+               opens your email client or dialer. But scrapers harvesting
+               the raw HTML cannot extract the addresses.</p>
+            <p>Try these links:</p>
+            <p><a href="mailto:test@example.com">Email: test@example.com</a></p>
+            <p><a href="tel:+1-555-123-4567">Phone: +1-555-123-4567</a></p>
+            <p style="color:#888;font-size:0.9em;margin-top:8px;">
+               View source to see the obfuscated hrefs.</p>
+        </div>
+
+        <div class="footer">
+            Powered by <a href="https://rampart.dev">Rampart</a>
+        </div>
+    </div>
+</body>
+</html>
