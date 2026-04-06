@@ -33,7 +33,19 @@
     Elements with the data-no-scramble attribute are not scrambled.
 */
 
-var fontshuffle_c = require("rampart-fontshuffle");
+var fontshuffle_c;
+try {
+    fontshuffle_c = require("rampart-fontshuffle");
+} catch(e) {
+    rampart.utils.fprintf(rampart.utils.stderr,
+        `rampart-fontshuffle.so failed to load
+  If you are in the github cloned rampart_webshield/ directory, run:
+%as:%as make
+  to build.
+`,'red', 'me@myserver', 'blue', '~/rampart_webshield$');
+    process.exit(1);
+}
+
 var htmlmod = require("rampart-html");
 var curl = require("rampart-curl");
 
