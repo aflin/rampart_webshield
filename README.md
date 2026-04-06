@@ -16,7 +16,7 @@ unscrambling images.
 
 ## Live Demo
 
-[https://rampart.dev/webshield/](https://rdev.flin.org/webshield/)
+[https://rampart.dev/webshield/](https://rampart.dev/webshield/)
 
 ## Requirements
 
@@ -115,14 +115,29 @@ Obfuscates an HTML page by scrambling font cmap tables and remapping text conten
 | `seed` | Number | Positive integer for the PRNG seed |
 | `options.mode` | String | `"simple"` (default) or `"multi"` |
 | `options.mappings` | Object | Previously saved mapping data to reuse |
+| `options.email` | Boolean | Obfuscate `mailto:` and `tel:` links |
 | `options.images` | Boolean/Object | `true` for default 32px tiles, or `{tileSize: N}` |
-| `options.guard` | Boolean/Object | `true` for default 500ms delay, or `{delay: N}` |
+| `options.guard` | Boolean/Object | `true` for default 500ms delay, or `{delay: N}`. Implies `email: true`. |
 
 **Returns:** `{text, fonts, images, mappings, warnings}`
 
-Font files are discovered automatically from `@font-face` declarations in
-inline `<style>` tags and linked stylesheets.  Both local files and remote
-URLs (fetched via `rampart-curl`) are supported.
+Font files are discovered automatically from three sources:
+
+1. **Inline `@font-face`** — declarations in `<style>` blocks
+   within the HTML
+2. **`<link rel="stylesheet">`** — external stylesheets are
+   fetched (locally or via `rampart-curl`) and parsed for
+   `@font-face` rules
+3. **`@import url(...)`** — import statements inside `<style>`
+   blocks are fetched and parsed for `@font-face` rules
+
+Both local files and remote URLs are supported.  When fonts
+come from external sources (`<link>` or `@import`), the original
+stylesheet reference is preserved for `data-no-scramble` zones,
+and the scrambled fonts are injected inline with a `ws-` prefixed
+font-family name.
+
+**Not supported:** fonts loaded via JavaScript at runtime.
 
 ### ws.scrambleImage(image, seed [, options])
 
@@ -149,10 +164,18 @@ Usage: rampart webshield.js <input.html> <seed> [output_dir] [options]
   --simple         - Use simple mode (1-to-1 substitution)
   --multi          - Use multi mode (default, defeats frequency analysis)
   --reuse          - Reuse existing font + mappings from source directory
+  --email          - Obfuscate mailto: and tel: links
   --images         - Scramble <img> tags (tile shuffle, requires rampart-gm)
   --tile-size N    - Tile size in pixels (default: 32)
-  --guard          - Enable CDP detection + delayed font loading
+  --guard          - Enable CDP detection + delayed font loading (implies --email)
   --guard-delay N  - Delay in ms before font loads (default: 500)
+  help             - Show detailed help
+```
+
+For detailed help including descriptions of all modes and features:
+
+```bash
+rampart webshield.js help
 ```
 
 ## Modes
@@ -174,11 +197,11 @@ each character gets ~22 aliases.
 
 ## Features
 
-### No-Scramble Zones
+### No-Scramble and Scramble Zones
 
-Add `data-no-scramble` to any element to prevent its text and images from
-being scrambled.  Use this for code blocks or other content that needs to be
-copy-pasteable.
+Add `data-no-scramble` to any element to prevent its text and
+images from being scrambled.  Use this for code blocks or other
+content that needs to be copy-pasteable.
 
 ```html
 <div data-no-scramble="true">
@@ -186,7 +209,8 @@ copy-pasteable.
 </div>
 ```
 
-Pair with a system font in CSS so unscrambled text renders correctly:
+Pair with a system font in CSS so unscrambled text renders
+correctly:
 
 ```css
 [data-no-scramble],
@@ -196,6 +220,26 @@ Pair with a system font in CSS so unscrambled text renders correctly:
 }
 ```
 
+Use `data-scramble` to re-enable scrambling inside a
+`data-no-scramble` zone.  This is useful when most of a page
+should remain unscrambled but specific elements (like an email
+link) need protection:
+
+```html
+<body data-no-scramble="true">
+    <p>This text is not scrambled.</p>
+    <p>Contact: <a href="mailto:user@example.com"
+        data-scramble="true">user@example.com</a></p>
+</body>
+```
+
+In the example above, only the email link text is scrambled.
+The surrounding text uses the original fonts.  When fonts are
+loaded from an external stylesheet (like Google Fonts), the
+original `<link>` tag is preserved for no-scramble zones, and
+the scrambled fonts are injected with a `ws-` prefix for
+scrambled zones.
+
 ### Image Scrambling
 
 Images are tile-shuffled using a seeded PRNG.  A client-side canvas script
@@ -203,6 +247,19 @@ reassembles the tiles in the browser.  The scrambled image file is served
 directly — right-clicking and saving gives you the shuffled version.
 
 Requires the `rampart-gm` module and GraphicsMagick libraries.
+
+### Email and Phone Protection
+
+When `--email` is used (or `--guard`, which implies it), `mailto:`
+and `tel:` links are obfuscated in the HTML source.  The href is
+replaced with `#` and the address is XOR-encoded in a data attribute.
+A small inline script decodes the address on click, so the link works
+normally for human visitors.
+
+Scrapers harvesting the raw HTML cannot extract the addresses — they
+see `href="#"` and an opaque data attribute.  With `--guard`, the
+decoder script is inside the guarded code path, so bots that fail
+the CDP check never get access to the decode function at all.
 
 ### Guard Mode
 
@@ -285,7 +342,8 @@ cannot correlate repeated requests to crack the substitution.
 
 ### Font Obfuscation
 
-1. Parses the HTML to find `@font-face` declarations
+1. Parses the HTML to find `@font-face` declarations (inline,
+   `<link>`, and `@import`)
 2. Reads the font file (local or remote via `rampart-curl`)
 3. Parses the TrueType/OpenType `cmap` table (Format 4 and Format 12)
 4. Shuffles the codepoint-to-glyph mappings using a seeded xorshift64 PRNG
@@ -365,7 +423,9 @@ renders, preventing the user from copying them.
   with a clear error
 - **Font collections (TTC) not supported**
 - **cmap Formats 4 and 12 only** — covers ~99% of fonts in practice
-- **`@import` in CSS is not followed**
+- **JavaScript font loading** — fonts loaded via the `FontFace`
+  API or dynamically injected `<link>`/`<style>` tags at runtime
+  are not discovered
 - **Accessibility** — Screen readers will read scrambled codepoints.
   The `<title>` tag is preserved for browser tabs.
 - **Copy/paste** — Users copying text get scrambled characters

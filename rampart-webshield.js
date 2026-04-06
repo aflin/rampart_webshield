@@ -87,7 +87,8 @@ function extractFontUrls(cssText) {
             if (/^data:/.test(fontUrl)) continue;
             fonts.push({
                 url: fontUrl,
-                isRemote: /^https?:\/\//.test(fontUrl)
+                isRemote: /^https?:\/\//.test(fontUrl),
+                cssBlock: block
             });
         }
     }
@@ -128,7 +129,9 @@ function obfuscatedName(url, seed) {
 
 /* ============================================================
    HTML walker: tracks tag state, script/style depth, and
-   data-no-scramble zones.
+   data-no-scramble / data-scramble zones.
+   Supports nesting: data-scramble inside data-no-scramble
+   re-enables scrambling for that subtree.
    ============================================================ */
 
 function HtmlWalker(htmlStr) {
@@ -140,8 +143,7 @@ function HtmlWalker(htmlStr) {
     this.inScript = 0;
     this.inStyle = 0;
     this.inTitle = 0;
-    this.noScrambleTag = '';
-    this.noScrambleDepth = 0;
+    this.zoneStack = [];  /* stack of {tagName, depth, protect} */
 }
 
 HtmlWalker.prototype.analyzeTag = function() {
@@ -160,21 +162,35 @@ HtmlWalker.prototype.analyzeTag = function() {
     else if (!isClosing && tagName === 'title') this.inTitle++;
     else if (isClosing && tagName === 'title') this.inTitle = Math.max(0, this.inTitle - 1);
 
-    if (this.noScrambleDepth > 0) {
-        if (isClosing && tagName === this.noScrambleTag) {
-            this.noScrambleDepth--;
-            if (this.noScrambleDepth === 0) this.noScrambleTag = '';
-        } else if (!isClosing && !isSelfClosing && tagName === this.noScrambleTag) {
-            this.noScrambleDepth++;
+    /* Zone stack: track data-no-scramble and data-scramble nesting */
+    var top = this.zoneStack.length > 0 ? this.zoneStack[this.zoneStack.length - 1] : null;
+
+    if (top) {
+        if (isClosing && tagName === top.tagName) {
+            top.depth--;
+            if (top.depth === 0) this.zoneStack.pop();
+        } else if (!isClosing && !isSelfClosing && tagName === top.tagName) {
+            top.depth++;
         }
-    } else if (!isClosing && !isSelfClosing && /data-no-scramble/.test(tag)) {
-        this.noScrambleTag = tagName;
-        this.noScrambleDepth = 1;
+    }
+
+    if (!isClosing && !isSelfClosing) {
+        if (/data-no-scramble/.test(tag)) {
+            this.zoneStack.push({ tagName: tagName, depth: 1, protect: true });
+        } else if (/data-scramble/.test(tag) && !(/data-no-scramble/.test(tag))) {
+            this.zoneStack.push({ tagName: tagName, depth: 1, protect: false });
+        }
     }
 };
 
 HtmlWalker.prototype.isProtected = function() {
-    return this.inTag || this.inScript > 0 || this.inStyle > 0 || this.inTitle > 0 || this.noScrambleDepth > 0;
+    if (this.inTag || this.inScript > 0 || this.inStyle > 0 || this.inTitle > 0)
+        return true;
+    /* Check zone stack: topmost zone determines scramble state */
+    for (var i = this.zoneStack.length - 1; i >= 0; i--) {
+        return this.zoneStack[i].protect;
+    }
+    return false;  /* no zones — default is to scramble */
 };
 
 /* ============================================================
@@ -467,18 +483,63 @@ function findFontsInHtml(htmlText, baseDir) {
     var doc = htmlmod.newDocument(htmlText, { dropEmptyElements: false });
     var allFontUrls = [];
 
+    var importHrefs = [];  /* track @import URLs that contain fonts */
     var styleTags = doc.findTag("style");
     if (styleTags.length > 0) {
         var styleTexts = styleTags.toHtml();
         for (var si = 0; si < styleTexts.length; si++) {
             var content = styleTexts[si].replace(/^<style[^>]*>/i, '').replace(/<\/style>$/i, '');
+            /* Check for inline @font-face */
             var found = extractFontUrls(content);
             for (var fi = 0; fi < found.length; fi++)
                 allFontUrls.push(found[fi]);
+            /* Check for @import url(...) */
+            var importRe = /@import\s+url\(\s*['"]?([^'")]+?)['"]?\s*\)/g;
+            var importMatch;
+            while ((importMatch = importRe.exec(content)) !== null) {
+                var importUrl = importMatch[1];
+                var importCss;
+                if (/^https?:\/\//.test(importUrl)) {
+                    try {
+                        var res = curl.fetch(importUrl);
+                        if (res.status === 200)
+                            importCss = rampart.utils.bufferToString(res.body);
+                        else
+                            throw new Error("fontshuffle: @import fetch returned status " + res.status + ": " + importUrl);
+                    } catch(e) {
+                        if (e.message && e.message.indexOf("fontshuffle:") === 0) throw e;
+                        throw new Error("fontshuffle: could not fetch @import: " + importUrl + " (" + (e.message || e) + ")");
+                    }
+                } else {
+                    var importPath = importUrl.charAt(0) === '/'
+                        ? importUrl : baseDir + '/' + importUrl;
+                    importCss = rampart.utils.readFile(importPath, true);
+                    if (!importCss)
+                        throw new Error("fontshuffle: could not read @import file: " + importPath);
+                }
+                if (importCss) {
+                    var importBaseDir = /^https?:\/\//.test(importUrl)
+                        ? importUrl.replace(/\/[^\/]*$/, '') : baseDir;
+                    var importFonts = extractFontUrls(importCss);
+                    if (importFonts.length > 0) {
+                        /* Decode HTML entities that rampart-html may have added */
+                        importHrefs.push(importUrl.replace(/&amp;/g, '&'));
+                        for (var fi = 0; fi < importFonts.length; fi++) {
+                            if (!importFonts[fi].isRemote && /^https?:\/\//.test(importUrl)) {
+                                importFonts[fi].url = importBaseDir + '/' + importFonts[fi].url;
+                                importFonts[fi].isRemote = true;
+                            }
+                            importFonts[fi].fromExternal = true;
+                            allFontUrls.push(importFonts[fi]);
+                        }
+                    }
+                }
+            }
         }
     }
 
     var linkTags = doc.findTag("link");
+    var fontLinkHrefs = [];  /* track <link> tags that contain fonts, to remove later */
     if (linkTags.length > 0) {
         var linkAttrs = linkTags.getAllAttr();
         for (var li = 0; li < linkAttrs.length; li++) {
@@ -490,11 +551,18 @@ function findFontsInHtml(htmlText, baseDir) {
                         var res = curl.fetch(la.href);
                         if (res.status === 200)
                             cssText = rampart.utils.bufferToString(res.body);
-                    } catch(e) { /* skip */ }
+                        else
+                            throw new Error("fontshuffle: stylesheet fetch returned status " + res.status + ": " + la.href);
+                    } catch(e) {
+                        if (e.message && e.message.indexOf("fontshuffle:") === 0) throw e;
+                        throw new Error("fontshuffle: could not fetch stylesheet: " + la.href + " (" + (e.message || e) + ")");
+                    }
                 } else {
                     var cssPath = la.href.charAt(0) === '/'
                         ? la.href : baseDir + '/' + la.href;
                     cssText = rampart.utils.readFile(cssPath, true);
+                    if (!cssText)
+                        throw new Error("fontshuffle: could not read stylesheet: " + cssPath);
                 }
                 if (cssText) {
                     var cssBaseDir;
@@ -506,14 +574,18 @@ function findFontsInHtml(htmlText, baseDir) {
                         cssBaseDir = cssPath2.replace(/\/[^\/]*$/, '');
                     }
                     var found = extractFontUrls(cssText);
-                    for (var fi = 0; fi < found.length; fi++) {
-                        if (!found[fi].isRemote && /^https?:\/\//.test(la.href)) {
-                            found[fi].url = cssBaseDir + '/' + found[fi].url;
-                            found[fi].isRemote = true;
-                        } else if (!found[fi].isRemote) {
-                            found[fi].localBaseDir = cssBaseDir;
+                    if (found.length > 0) {
+                        fontLinkHrefs.push(la.href);
+                        for (var fi = 0; fi < found.length; fi++) {
+                            if (!found[fi].isRemote && /^https?:\/\//.test(la.href)) {
+                                found[fi].url = cssBaseDir + '/' + found[fi].url;
+                                found[fi].isRemote = true;
+                            } else if (!found[fi].isRemote) {
+                                found[fi].localBaseDir = cssBaseDir;
+                            }
+                            found[fi].fromExternal = true;
+                            allFontUrls.push(found[fi]);
                         }
-                        allFontUrls.push(found[fi]);
                     }
                 }
             }
@@ -531,7 +603,7 @@ function findFontsInHtml(htmlText, baseDir) {
         }
     }
 
-    return unique;
+    return { fonts: unique, fontLinkHrefs: fontLinkHrefs, importHrefs: importHrefs };
 }
 
 /* ============================================================
@@ -710,7 +782,10 @@ function fontshuffle(webpage, seed, options) {
         if (baseDir === webpage) baseDir = '.';
     }
 
-    var uniqueFonts = findFontsInHtml(htmlText, baseDir);
+    var fontSearch = findFontsInHtml(htmlText, baseDir);
+    var uniqueFonts = fontSearch.fonts;
+    var fontLinkHrefs = fontSearch.fontLinkHrefs;
+    var importHrefs = fontSearch.importHrefs;
     if (uniqueFonts.length === 0)
         throw new Error(
             "fontshuffle: no font files found in @font-face declarations.\n\n" +
@@ -859,8 +934,100 @@ function fontshuffle(webpage, seed, options) {
             ": " + samples.join(', ') + (missing.length > 10 ? ', ...' : ''));
     }
 
-    /* Update font URLs, then remap text */
-    var updatedHtml = updateFontUrls(htmlText, fontUrlMap);
+    /* Inject comment and notranslate meta tag */
+    var headTag = htmlText.indexOf('<head');
+    var headEnd = htmlText.indexOf('>', headTag);
+    if (headTag >= 0 && headEnd >= 0) {
+        htmlText = htmlText.substring(0, headEnd + 1) +
+            '\n<!-- Obfuscated with rampart-webshield - https://github.com/aflin/rampart_webshield/ -->' +
+            '\n<meta name="google" content="notranslate">' +
+            htmlText.substring(headEnd + 1);
+    }
+
+    /* Handle font CSS injection.
+       - For inline <style> @font-face: replace URLs directly (no conflict)
+       - For external <link> @font-face: keep the <link> (original fonts for
+         no-scramble zones), inject scrambled fonts with 'ws-' prefixed names,
+         and add 'ws-scrambled' class to elements outside no-scramble zones */
+    var cleanedHtml = htmlText;
+    var hasExternalFonts = fontLinkHrefs.length > 0 || importHrefs.length > 0;
+
+    if (hasExternalFonts) {
+        /* Build inline @font-face rules with ws- prefixed font-family names */
+        var inlineFontCss = '';
+        var wsFamilies = {};  /* track unique ws- family names */
+        var origFamilies = {};  /* track original family names (external only) */
+        for (var i = 0; i < uniqueFonts.length; i++) {
+            var fi = uniqueFonts[i];
+            if (fi.cssBlock && fontUrlMap[fi.url]) {
+                var block = fi.cssBlock;
+                /* Replace the URL */
+                var escapedUrl = fi.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                block = block.replace(new RegExp(escapedUrl, 'g'), fontUrlMap[fi.url]);
+                /* Rename font-family to ws- prefix */
+                block = block.replace(
+                    /font-family:\s*['"]([^'"]+)['"]/,
+                    function(match, name) {
+                        var wsName = 'ws-' + name;
+                        wsFamilies[wsName] = true;
+                        if (fi.fromExternal) origFamilies[name] = true;
+                        return "font-family:'" + wsName + "'";
+                    }
+                );
+                inlineFontCss += block + '\n';
+            }
+        }
+
+        /* Build CSS rules: ws-scrambled uses ws- fonts, no-scramble resets to originals */
+        var wsFamilyList = Object.keys(wsFamilies).map(function(n) { return "'" + n + "'"; }).join(',');
+        var origFamilyList = Object.keys(origFamilies).map(function(n) { return "'" + n + "'"; }).join(',');
+        if (wsFamilyList) {
+            inlineFontCss += '.ws-scrambled,.ws-scrambled *{font-family:' + wsFamilyList + ',sans-serif!important}\n';
+            inlineFontCss += '[data-no-scramble][data-no-scramble][data-no-scramble],[data-no-scramble][data-no-scramble][data-no-scramble] *{font-family:' + origFamilyList + ',sans-serif!important}\n';
+            inlineFontCss += '[data-scramble],[data-scramble] *{font-family:' + wsFamilyList + ',sans-serif!important}\n';
+        }
+
+        /* Inject the CSS before </head> */
+        if (inlineFontCss) {
+            var headClose = cleanedHtml.indexOf('</head>');
+            if (headClose === -1) headClose = cleanedHtml.indexOf('<body');
+            if (headClose === -1) headClose = 0;
+            cleanedHtml = cleanedHtml.substring(0, headClose) +
+                '<style>\n' + inlineFontCss + '</style>\n' +
+                cleanedHtml.substring(headClose);
+        }
+
+        /* Remove @import lines before DOM walk (prettyPrint would restore them) */
+        for (var ii = 0; ii < importHrefs.length; ii++) {
+            /* Build regex that matches both & and &amp; variants */
+            var escaped = importHrefs[ii].replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/&/g, '(?:&|&amp;)');
+            cleanedHtml = cleanedHtml.replace(
+                new RegExp('@import\\s+url\\(\\s*[\'"]?' + escaped + '[\'"]?\\s*\\)[^;]*;?', 'gi'),
+                '/* import removed by webshield */');
+        }
+
+        /* Walk DOM: add ws-scrambled class to body children not inside data-no-scramble */
+        var doc2 = htmlmod.newDocument(cleanedHtml, { dropEmptyElements: false });
+        var body = doc2.findTag("body");
+        if (body.length > 0) {
+            var bodyChildren = body.children();
+            var noScrambleFlags = bodyChildren.hasAttr("data-no-scramble");
+            for (var ci = 0; ci < bodyChildren.length; ci++) {
+                if (!noScrambleFlags[ci]) {
+                    bodyChildren.eq(ci).addClass("ws-scrambled");
+                }
+            }
+            cleanedHtml = doc2.prettyPrint({indent: false, wrap: 0});
+        }
+        doc2.destroy();
+
+    } else {
+        /* No external fonts — just update URLs in inline @font-face */
+        cleanedHtml = updateFontUrls(cleanedHtml, fontUrlMap);
+    }
+
+    /* Update any remaining inline font URLs, then remap text */
+    var updatedHtml = updateFontUrls(cleanedHtml, fontUrlMap);
     var obfuscatedHtml = remapHtmlText(updatedHtml, combinedMapping, isMulti);
 
     /* Process images if requested */
@@ -876,12 +1043,33 @@ function fontshuffle(webpage, seed, options) {
                 warnings.push(imgResult.warnings[wi]);
     }
 
-    /* Obfuscate mailto: and tel: links when guard is active */
+    /* Obfuscate mailto: and tel: links */
     var hasMailto = false;
-    if (guard) {
+    var emailOpt = options.email || false;
+    if (guard || emailOpt) {
         var mailResult = obfuscateMailtoTel(obfuscatedHtml, seed);
         obfuscatedHtml = mailResult.html;
         hasMailto = mailResult.count > 0;
+        /* If no guard, inject standalone mailto decoder script */
+        if (hasMailto && !guard) {
+            var xorKey = seed % 256;
+            var decoderScript = '\n<script>' +
+                'var xk=' + xorKey + ';' +
+                'function dc(v){var s=atob(v),o="";for(var i=0;i<s.length;i++)o+=String.fromCharCode(s.charCodeAt(i)^xk);return o}' +
+                'var ml=document.querySelectorAll("[data-ws-m]");for(var i=0;i<ml.length;i++){(function(el){el.addEventListener("click",function(ev){ev.preventDefault();window.location.href="mailto:"+dc(el.getAttribute("data-ws-m"))})})(ml[i])}' +
+                'var tl=document.querySelectorAll("[data-ws-t]");for(var i=0;i<tl.length;i++){(function(el){el.addEventListener("click",function(ev){ev.preventDefault();window.location.href="tel:"+dc(el.getAttribute("data-ws-t"))})})(tl[i])}' +
+                '<\/script>\n';
+            var bodyClose = obfuscatedHtml.lastIndexOf('</body>');
+            if (bodyClose === -1) bodyClose = obfuscatedHtml.lastIndexOf('</html>');
+            if (bodyClose === -1) bodyClose = obfuscatedHtml.length;
+            obfuscatedHtml = obfuscatedHtml.substring(0, bodyClose) + decoderScript + obfuscatedHtml.substring(bodyClose);
+        }
+    } else {
+        /* Warn if mailto/tel links are present but neither --guard nor --email is used */
+        var mailtoCount = (obfuscatedHtml.match(/href\s*=\s*['"]mailto:/gi) || []).length;
+        var telCount = (obfuscatedHtml.match(/href\s*=\s*['"]tel:/gi) || []).length;
+        if (mailtoCount + telCount > 0)
+            warnings.push("Found " + (mailtoCount + telCount) + " mailto/tel link(s) that are not obfuscated. Use --guard or --email to protect them.");
     }
 
     /* Apply guard if requested */
@@ -1069,12 +1257,13 @@ function processImages(html, seed, outputDir, baseDir, options, skipScript) {
         if (nsw.inTag) {
             nsw.tagBuf += ch;
             if (ch === '>') {
-                var wasProt = nsw.noScrambleDepth > 0;
+                var wasProt = nsw.zoneStack.length > 0 && nsw.zoneStack[nsw.zoneStack.length-1].protect;
                 nsw.analyzeTag();
                 nsw.inTag = false;
                 nsw.tagBuf = '';
-                if (!wasProt && nsw.noScrambleDepth > 0) nsStart = nsw.i + 1;
-                if (wasProt && nsw.noScrambleDepth === 0) noScrambleRanges.push([nsStart, nsw.i]);
+                var isProt = nsw.zoneStack.length > 0 && nsw.zoneStack[nsw.zoneStack.length-1].protect;
+                if (!wasProt && isProt) nsStart = nsw.i + 1;
+                if (wasProt && !isProt) noScrambleRanges.push([nsStart, nsw.i]);
             }
             nsw.i++; continue;
         }
